@@ -1,0 +1,20 @@
+{
+  "name": "nodedrop",
+  "version": "0.0.0",
+  "homepage": "https://github.com/dominictarr/nodedrop",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/dominictarr/nodedrop.git"
+  },
+  "dependencies": {
+    "graceful-fs": "~1.1.14",
+    "ls-r": "~0.2.1",
+    "through": "~2.1.0"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "set -e; for t in test/*.js; do node $t; done"
+  },
+  "author": "Dominic Tarr <dominic.tarr@gmail.com> (http://dominictarr.com)",
+  "license": "MIT"
+}
