@@ -16,7 +16,9 @@ function hashStream (alg, encoding) {
   })
 }
 
-function hashTree (dir, cb) {
+function hashTree (dir, filter, cb) {
+  if(!cb)
+    cb = filter, filter = null
 
   ls(dir, function (err, _, files) {
     if (err) return cb(err)
@@ -27,14 +29,16 @@ function hashTree (dir, cb) {
     files.forEach(function (file) {
       if(file.isDirectory())
         return next()
-
+      var name = relative(dir, file.path)
+      if(filter && !filter(name, file))
+        return next()
       var rs = fs.createReadStream(file.path)
       streams.push(rs)
 
       rs.pipe(hashStream())
         .once('data', function (hash) {
           
-          hashes[relative(dir, file.path)] = hash
+          hashes[name] = hash
           next()
         })
     })
