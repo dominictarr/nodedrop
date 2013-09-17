@@ -9,112 +9,78 @@ var Store        = require('./store')
 function hash (obj) {
   if('string' === typeof obj)
     return shasum(obj)
-  return shasum(obj ? JSON.stringify(obj) : '')
+  if(!obj) return shasum('')
+
+  var o = {}
+  for(var f in obj)
+    o[f] = obj[f].hash
+
+  return shasum(JSON.stringify(o))
 }
 
-function initTree (tree, old) {
-  old = old || {}
-  var ts = timestamp(), t = {}
-
-  for(var file in tree) {
-    var hash = tree[file].hash || tree[file]
-    var _hash = old[file] ? old[file].hash : old[hash]
-    if(!old[file]) {
-      t[file] = {hash: hash, ts: ts}
-    } else if(hash === _hash) {
-      t[file] = old[file]
-    } else {
-      var _ts = tree[file].ts || ts
-      console.log(_ts , old[file].ts)
-      t[file] = clone(_ts > old[file].ts ? {hash: tree[file], ts: ts} : old[file])
-    }
-  }
-
-  return t
-}
-
-function clone (o) {
-  var c = {}
-  for(var k in o)
-    c[k] = o[k]
-  return c
-}
-
-function diffTree (mine, yours) {
-  if(!yours) return mine
-  //find files to SEND
-  var send = {}
-  for (var file in mine) {
-    if(!yours[file])
-      send[file] = clone(mine[file])
-    else if(yours[file].hash !== mine[file].hash 
-        && (yours[file].ts || ts) < mine[file].ts
-      ) send[file] = clone(mine[file])
-  }
-
-  return send
+function clone (obj) {
+  var o = {}
+  for (var k in obj)
+  { o[k] = 'object' !== typeof obj[k] ? obj[k] : clone(obj[k]) }
+  return o
 }
 
 module.exports = function (dir, storeDir) {
 
-  var store = Store(dir, storeDir || dir + '/.nodedrop')
-  var emitter = new EventEmitter() 
+  var Watch = require('./watch')
+
+  var emitter = Watch(dir, storeDir || dir + '/.nodedrop')
   var d = duplex()
 
-  emitter.poll = function () {
-    if(emitter.polling) return
-    emitter.polling = true
-    emitter.emit('polling')
-    hashTree(dir, function (filename) {
-      return (
-        !~filename.indexOf('.git') 
-      && !~filename.indexOf('.nodedrop') 
-      && !/node_modules/.test(filename)
-      )
-
-    }, function (err, tree) {
-      
-      if(err) throw err
-      tree = initTree(tree, emitter.tree || {})
-
-      console.log('tree', tree)
-
-      var ts = timestamp()
-
-      var diff = diffTree(tree, emitter.tree) 
-      if(!Object.keys(diff).length) {
-        emitter.polling = false
-        console.log('NOCHANGE')
-        return emitter.emit('polled', emitter.tree)
-      }
-      console.log('DIFF?', diff)
-      store.putAll(diff, function (err) {
-        //NOW, we are ready to replicate these files.
-        emitter.polling = false
-        emitter.tree = tree
-        console.log('CHANGE', tree)
-        emitter.emit('changed', emitter.tree)
-        emitter.emit('polled', emitter.tree)
-      })
-    })
-  }
-
-  emitter.on('polled', function () {
-    console.log('POLLED')
-    setTimeout(emitter.poll, 1000)
-  })
-
-  emitter.poll()
-
-  emitter.createStream = function () {
+  emitter.createStream = function (name) {
 
     var tophash = hash(emitter.tree)
     var tree    = clone(emitter.tree)
-      var last = null
+    var last = null
+    var streams = {}
 
     var d = duplex()
 
+    var syncing = false
+
     var other
+
+    function sync (_other) {
+      other = _other
+      var send = hashTree.diffTree(emitter.tree, other) 
+      var sending = clone(emitter.tree)
+
+      if(Object.keys(send).length) {
+        syncing = true
+        var n = 0
+        for(var file in send) (function (hash) {
+          n++
+          emitter.createReadStream(hash)
+            .on('data', function (data) {
+              d._data([hash, data])
+            })
+            .on('end', function () {
+              d._data([hash, null])
+              next()
+            })
+            .on('error', function (err) {
+              console.log('stream err', err)
+              throw err
+            })
+
+        })(send[file].hash)
+
+        function next() {
+          if(--n) return
+          other = sending
+          d.emit('synced')
+          console.log('SYNC', other)
+          syncing = false
+        }
+      }
+
+    }
+
 
     d.on('_data', function (data) {
       
@@ -122,43 +88,62 @@ module.exports = function (dir, storeDir) {
       var type  = data[0]
       var value = data[1]
 
+      if (type == 'TREE') {
+        sync(value)
+      } else {
+        //receive streams
+        var stream =
+          streams[type] = streams[type] || 
+            emitter.createWriteStream(type)
+            .on('error', function (err) {
+              console.log('stream err', err)
+              throw err
+            })
+            .on('end', function () {
+              delete streams[type];
+              if(!Object.keys(streams).length) {
+                var checkout = hashTree.merge(emitter.tree || {}, other)
+                console.log(checkout)
+                other = emitter.tree = checkout
+//                d._data(['tree', checkout])
 
-      if(type == 'SYNC') {
-        console.log('sync?', value, last)
-        other = value
-        if(!last || last != hash(emitter.tree)) {
-          console.log('respond', last)
-          d._data(['SYNC', last = tophash = hash(emitter.tree)])
-        } else if (emitter.tree) {
-          d._data(['TREE', emitter.tree]), sync = false
-        }
-      } else if (type == 'TREE') {
+                console.log('WOULD CHECKOUT NOW')
+                console.log('WOULD CHECKOUT NOW')
+                console.log('WOULD CHECKOUT NOW')
+                console.log('WOULD CHECKOUT NOW')
+                /*
+                emitter.checkout(checkout, function (err, e) {
+                  console.log('CHECKEDOUT')
+                })
+                */
+              }
+            })
 
-        //data to send
-        var send = diffTree(tree, value) 
-
-        console.log('SEND!!!', send)
+        if(value) stream.write(value)
+        else      stream.end()
       }
     })
 
     //send the tophash
-    emitter.on('changed', function () {
-      console.log('CHANGED', other)
-      if(!other)
-        d._data(['SYNC', last = tophash = hash(emitter.tree)])
-      else if(other != hash(emitter.tree))
+
+    if(emitter.tree)
+      d._data(['TREE', emitter.tree])
+    else
+      emitter.on('change', function () {
         d._data(['TREE', emitter.tree])
-    })
+      })
 
     d.on('_end', function () {
       d._end()
     })
-
     return d
 
   }
+
   return emitter
+
 }
 
 if(!module.parent)
   module.exports(process.cwd())
+

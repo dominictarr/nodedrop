@@ -10,9 +10,16 @@
     "graceful-fs": "~1.1.14",
     "ls-r": "~0.2.1",
     "through": "~2.1.0",
-    "shasum": "0.0.2"
+    "shasum": "0.0.2",
+    "duplex": "~1.0.0",
+    "stream-combiner": "0.0.1",
+    "redis-protocol-stream": "~0.1.4",
+    "monotonic-timestamp": "0.0.8",
+    "kv": "~1.1.0"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "tape": "~0.2.2"
+  },
   "scripts": {
     "test": "set -e; for t in test/*.js; do node $t; done"
   },

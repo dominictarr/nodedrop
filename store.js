@@ -4,9 +4,10 @@
 
 
 var gzip = require('zlib').createGzip
-var fs   = require('graceful-fs')
+var fs   = require('fs') //require('graceful-fs')
 var join = require('path').join
 var shasum = require('shasum')
+var through = require('through')
 
 var tmpDir = '/tmp/content_store_tmp'
 var nodedropDir = '/tmp/nodedrop'
@@ -25,7 +26,6 @@ catch (err) { if(err.code !== 'EEXIST') throw err }
 
 module.exports = function (dir, _dir) {
   var dropDir = _dir || nodedropDir
-  console.log('MKDIR', dropDir)
   try { fs.mkdirSync(dropDir) }
   catch (err) { if(err.code !== 'EEXIST') throw err }
 
@@ -38,11 +38,10 @@ module.exports = function (dir, _dir) {
       n++
       var hash = tree[file].hash || tree[file]
       file = join(dir, file)
-      console.log('put', file)
       cancel.push(store.prePut(hash, file, next))
     }
 
-    if(!n) return console.log('!n'), cb()
+    if(!n) return cb()
 
     function next(err, mv) {
       if(err) {
@@ -52,7 +51,7 @@ module.exports = function (dir, _dir) {
       }
       if(mv) move.push(mv)
       if(--n) return console.log('n', n)
-      console.log('move', mv)
+
       var m = move.length
       move.forEach(function (mv) {
         mv(_next)
@@ -132,6 +131,31 @@ module.exports = function (dir, _dir) {
   r.get = function (hash, encoding, cb) {
     var prefix = hash.substring(0, 2)
     fs.readFile(join(dir, prefix, hash.substring(2)), encoding, cb)
+  }
+
+  r.getStream = function (hash, encoding) {
+    var prefix = hash.substring(0, 2)
+    return fs.createReadStream(join(dropDir, prefix, hash.substring(2)), 
+      {encoding: encoding}).on('error', function (err) {
+        console.log("EROEHUROEHU", err)
+      })
+  }
+
+  r.putStream = function (hash, encoding) {
+
+    var ts = through().pause(), ws
+
+    var prefix  = hash.substring(0, 2)
+    fs.mkdir(join(dropDir, prefix), function (err) {
+      //copy
+      if(err && err.code !== 'EEXIST') return cb(err)
+
+      ws = fs.createWriteStream(join(dropDir, prefix, hash.substring(2)),
+        {encoding: encoding, flags: 'w', mode: 0666})
+      ts.pipe(ws)
+      ts.resume()
+    })
+    return ts
   }
 
   r.dir = dir
